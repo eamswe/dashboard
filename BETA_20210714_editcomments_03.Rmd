@@ -22,10 +22,15 @@ color:#EDECE5!important;
 </style> 
 
 ```{r setup, include=FALSE}
+setwd("G:/dashboard")
 # This where we load up all the packages need to run the dashboard.
 library("flexdashboard")
+library("readxl")
 library("plotly")
 library("reshape2")
+library("tidyquant")
+library("quantmod")
+library("TTR")
 library("zoo")
 library("xts")
 library("dygraphs")
@@ -33,13 +38,14 @@ library("rio")
 library("openxlsx")
 library("parsedate")
 library("janitor")
-library("tidyverse")
 library("dplyr")
+library("tidyverse")
 library("ggplot2")
 library("readr")
 library("tidyr")
 library("forcats")
 library("timetk")
+library("raster")
 library("viridis")
 library("plotly")
 library("tidyverse")
@@ -103,31 +109,9 @@ scale_fill_govie <- function(palette = "main", discrete = TRUE, reverse = FALSE,
    }
  }
 #Change xlsx to csv so R can read dates 
-convert("External - Daily spending per country.xlsx", "rev.csv")
-spending <- read_csv("rev.csv")
-#Import old data
-spendapril <- read_csv("dataapril.csv")
-
-#Clean data to remove spaces 
-spending <- clean_names(spending)
-spendingapril <- clean_names(spendapril)
-spendingapril$date <- as.Date(spendingapril$date , format = "%d/%m/%Y")
-
-#Bind old and new data  
-spendmerge <- rbind(spending, spendingapril)
-#Create IE subset of spending data
-spendingIE <- subset(spendmerge, country=="IE",
-                  select=c(country, date, total_spending_per_user_sma7))
-spendingIE <- spendingIE[order(as.Date(spendingIE$date, format="%Y-%m-%Y")),]
-
-rownames(spendingIE) <- NULL
-#Create Index
-spendingIE <- transform(spendingIE, spend_index= (total_spending_per_user_sma7/total_spending_per_user_sma7[7])*100)
 ##This is the equivalent line for the central bank data. What this tells R to do is to divide each observation in ‘Spending_on_all_cards’ by the seventh observation (the first 6 are blank because it’s a 7 day average).
 #This summarises the above dataframe into just the last observation for the value box on the summary page
-spendingsum <- spendingIE %>%
-summarise(spending_index=last(spend_index))
-spendingsum <- round(spendingsum, digits=0)
+
 #ECDC data
 ECDCcovid <- read.csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", na.strings = "", fileEncoding = "UTF-8-BOM")
 ECDCcovid <- clean_names(ECDCcovid)
@@ -175,11 +159,6 @@ incidence <- COVID_IE %>%
   summarise(incidence14 =last(incidence_14day_per_100k))
 incidence <- round(incidence, digits=0)
 
-weekonweek <- spendingIE %>%
-  mutate(difference = spend_index - lag(spend_index, n=7))
-weekonweek <- weekonweek %>% 
-  summarise(difference=last(difference))
-weekonweek <- round(weekonweek, digits=0)
 #vaccine data
 vax <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/vaccinations/vaccinations.csv")
 vax <- subset(vax, location=="Ireland",
@@ -229,16 +208,10 @@ valueBox(rt_ie, icon = "fa-registered", caption ="Estimated Reproduction Number"
 
 ```
 
-### Spending Index
-
-```{r}
-spending <- spendingsum
-valueBox(spending, icon = "fa-credit-card", caption ="Revolut Spending Index", color= "#00A685")
-```
-
 
 
 Column 
+-----------------------------------------------------------------------
 
 ### Percentage of total population vaccinated
 ```{r}
@@ -308,91 +281,7 @@ ggplotly(vax_eu_plot, tooltip = c("text"))
 
 > Source: ECDC. This is expressed as a percentage of the total population rather than the eligible (adult) population.
 
-Column 
------------------------------------------------------------------------
-
-### Oxford Stringency Index
-
-```{r}
-#read data from website
-ox <- read.csv(url("https://github.com/OxCGRT/covid-policy-tracker/raw/master/data/timeseries/stringency_index.csv"))
-#subset: only interested in some countries
-ox_comp<- subset(ox, country_code=="IRL" | country_code=="GBR" | country_code=="ESP" | country_code=="ITA" | country_code=="SWE" | country_code=="USA" | country_code=="FRA" | country_code=="DEU", select = -c(country_name, X))
-ox_comp1 <- data.frame(t(ox_comp[-1]))
-colnames(ox_comp1) <- ox_comp[, 1]
-ox_comp1$date <- rownames(ox_comp1)
-
-ox_comp1$date <-as.Date(ox_comp1$date, format = "X%d%b%Y")
-
-#this type of graph needs to have its data in an xts format. This line of code converts the data from a dataframe to an xts object.
-ox_xts <- tk_xts(ox_comp1, select = IRL | GBR | ESP | ITA | SWE | USA | FRA | DEU, date_var = date) 
-dygraph(ox_xts)  %>%
-  dyEvent("2020-03-27", "Lockdown", labelLoc = "bottom") %>%
-  dyEvent("2020-08-07", "Midlands restrictions", labelLoc = "bottom") %>%
-  dyEvent("2020-10-5", "Nationawide L3", labelLoc = "bottom") %>%
-  dyEvent("2020-10-21", "Level 5", labelLoc = "bottom") %>%
-  dyHighlight(highlightCircleSize = 5, 
-              highlightSeriesBackgroundAlpha = 0.5,
-              hideOnMouseOut = TRUE) %>%
-  dyOptions(colors = RColorBrewer::brewer.pal(8, "Dark2")) %>%
-  dySeries("IRL", stepPlot = TRUE, strokeWidth = 5, color = "#00a685", )
-
-
-```
-
-> Source: Oxford Blavatnik School of Government
-
-### COVID-19  14-day Incidence per 100,000 population
  
-```{r}
-#This follows the same procedure as the value box  for creating the 14 day incidence rate;
-ECDCcovid <- read.csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", na.strings = "", fileEncoding = "UTF-8-BOM")
-ECDCcovid <- clean_names(ECDCcovid)
-ECDCcovid$date_rep <- as.Date(ECDCcovid$date_rep , format = "%d/%m/%y")
-COVID_EU_pop <- subset(ECDCcovid, geo_id=="IE" | geo_id=="BE" | geo_id=="BG" | geo_id=="CZ" | geo_id=="DK" | geo_id=="DE" | geo_id=="EE" | geo_id=="EL" | geo_id=="FR" | geo_id=="HR" | geo_id=="IT" | geo_id=="CY" | geo_id=="LV" | geo_id=="LT" | geo_id=="LU" | geo_id=="HU" | geo_id=="MT" | geo_id=="NL" | geo_id=="AT" | geo_id=="PL" | geo_id=="PT" | geo_id=="RO" | geo_id=="SI" | geo_id=="SK" | geo_id=="FI" | geo_id=="SE" | geo_id=="UK" | geo_id=="IL",
-                       select=c(date_rep, countries_and_territories, pop_data2019))
-COVID_EU_pop <- subset(COVID_EU_pop, date_rep == "2020-12-14")
-
-
-COVID_EU_pop <- COVID_EU_pop %>% 
-  rename(
-    country = countries_and_territories,
-  )
-COVID_EU_pop <- COVID_EU_pop %>% 
-  mutate(country = ifelse(as.character(country) == "United_Kingdom", "United.Kingdom", as.character(country)))
-JHU_covid <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_cases.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
-JHU_covid <- JHU_covid %>% gather(country, cases, -c(date))
-JHU_covid <- merge(COVID_EU_pop, JHU_covid, by ="country")
-JHU_covid$date_rep <- NULL
-
-JHU_covid <- JHU_covid %>%
-  group_by(country) %>%
-  mutate(pop100k = pop_data2019/100000)
-JHU_covid$date <- as.Date(JHU_covid$date , format = "%Y-%m-%d")
-JHU_covid <- arrange(JHU_covid, date)
-JHU_covid <- JHU_covid %>% 
-  group_by(country)%>%
-  mutate(cumcases=fnrollsuml(cases))
-JHU_covid <- JHU_covid %>% 
-  mutate(incidence_14day_per_100k = cumcases/pop100k)
-spread_cases <- subset(JHU_covid,
-                        select=c(country, date, incidence_14day_per_100k))
-#in order to be an xts object our data has to be in wide format. This line (Spread) is what we use to switch from long (which is preferrable to wide)
-spread_cases <- spread(spread_cases, country, incidence_14day_per_100k)
-ECDC_xts <- tk_xts(spread_cases, select = Ireland | United.Kingdom | Italy | Sweden | France | Germany , date_var = date) 
-
-dygraph(ECDC_xts) %>%
-  dyOptions(colors = RColorBrewer::brewer.pal(8, "Dark2")) %>%
-  dySeries("Ireland", strokeWidth = 5, color = "#00a685") %>%
-  dyHighlight(highlightCircleSize = 5, 
-              highlightSeriesBackgroundAlpha = 0.5,
-              hideOnMouseOut = TRUE) %>% 
-  dyAxis("y", valueRange = c(0, 2000))
-
-```
-
-> Source: Johns Hopkins University/Our World in Data.
-
 Column
 -----------------------------------------------------------------------
 
@@ -598,80 +487,6 @@ dygraph(IE_mob_xts) %>%
 
 > 7 Day moving average. Source: Google
 
-
-
-Revolut
-=============================
-
-
-Row {data-height=600}
-------------------------------------------------------------------------------
-
-### Revolut Spending Index
-
-```{r}
-#This is just the graph as we have done all the manipulation above
-
-IExts <- tk_xts(spendingIE, select = spend_index, date_var = date)
-dygraph(IExts) %>%
-  dyEvent("2020-03-13","Schools Close", labelLoc = "bottom") %>%
-  dyEvent("2020-05-18", "Re-opening Phase 1", labelLoc = "bottom") %>%
-  dyEvent("2020-06-08", "Phase 2", labelLoc = "bottom") %>%
-  dyEvent("2020-06-28", "Phase 3", labelLoc = "bottom") %>%
-  dyEvent("2020-10-21", "Level 5", labelLoc = "bottom") %>%
- dyEvent("2020-12-01", "Retail re-opens", labelLoc = "bottom") %>%
-       dyEvent("2020-12-30", "Full Level 5", labelLoc = "bottom") %>%
-  dyEvent("2021-05-17", "Retail re-opens", labelLoc = "bottom") %>%
-  dyEvent("2021-06-07", "Outdoor Hospitality re-opems", labelLoc = "bottom") %>% 
-  dyAxis("y", label = "Spending per user (indexed to Feb avg.)") %>%
-  dyOptions(axisLineWidth = 1.5, fillGraph = TRUE)
-
-```
-
-> 7 day moving average, spending per user, Indexed to early February 2020. Source: Revolut.
-
-Row {data-height=500}
-------------------------------------------------------------------------------
-
-### Cross Country Spending
-
-```{r}
-spendingEU <- subset(spendmerge,
-                     select=c(country, date, relative_spending_per_user_sma7))
-spread_spend <- spread(spendingEU, country, relative_spending_per_user_sma7)
-crosscountry <- tk_xts(spread_spend, date_var = date)
-dygraph(crosscountry) %>%
-  dySeries("IE", strokeWidth = 3, color = "#00a685") %>%
-  dyAxis("y", label = "spending per user (indexed to Feb avg.)")
-  
-```
-
-> 7 day moving average, spending per user. Source: Revolut
-
-### Online & Offline Spending Proportion
-
-```{r}
-
-setwd("G:/dashboard")
-convert("External - Proportion of daily spending that is online v offline per country.xlsx", "onlineoffline.csv")
-onlineoffline <- read.csv('onlineoffline.csv')
-onlineoffline <- clean_names(onlineoffline)
-#Bind old and new data  
-onoffmar <- read.csv('offon.csv') #this is the old data
-onoffmar <- clean_names(onoffmar)
-onlineoffline <- rbind(onoffmar, onlineoffline)
-#Create IE subset of spending data
-onlineoffline <- subset(onlineoffline, country=="IE",
-                     select=c(date, physical_spending_sma7, online_spending_sma7))
-onlineoffline$date <- as.Date(onlineoffline$date)
-rownames(onlineoffline) <- NULL
-split <- tk_xts(onlineoffline, date_var = date)
-dygraph(split) %>%
-  dyAxis("y", label = "percentage of spending")
-
-```
-
-> 7 day moving averages. Source: Revolut
 
 
 
