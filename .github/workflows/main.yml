@@ -19,7 +19,7 @@ jobs:
           "janitor", "tidyverse", "readr", "forcats",
           "timetk", "scales", "viridis",
           "ISOweek", "fs"))
-          rmarkdown::render("BETA_20210714_editcomments_03.Rmd")
+          rmarkdown::render("index.Rmd")
         shell: Rscript {0}
         
         
