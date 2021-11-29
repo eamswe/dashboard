@@ -19,7 +19,7 @@ jobs:
           "janitor", "tidyverse", "readr", "forcats",
           "timetk", "scales", "viridis",
           "ISOweek", "fs"))
-          rmarkdown::render_site(encoding = "UTF-8")
+          rmarkdown::render("BETA_20210714_editcomments_03.Rmd")
         shell: Rscript {0}
         
       - name: Copy redirects and gallery images
