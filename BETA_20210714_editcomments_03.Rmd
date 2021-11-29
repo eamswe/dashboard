@@ -22,7 +22,6 @@ color:#EDECE5!important;
 </style> 
 
 ```{r setup, include=FALSE}
-setwd("G:/dashboard")
 # This where we load up all the packages need to run the dashboard.
 library("flexdashboard")
 library("readxl")
