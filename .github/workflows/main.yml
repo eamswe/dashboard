@@ -11,9 +11,6 @@ jobs:
       - uses: r-lib/actions/setup-r@master
 
       - uses: r-lib/actions/setup-pandoc@master
-      
-      - name: Copy redirects and gallery images
-        run: Rscript -e 'fs::file_copy("/_site")'
 
       - name: Install dependencies
         run: |
@@ -21,9 +18,12 @@ jobs:
           "zoo", "xts", "dygraphs", "rio", "openxlsx", "parsedate",
           "janitor", "tidyverse", "readr", "forcats",
           "timetk", "scales", "viridis",
-          "ISOweek"))
+          "ISOweek", "fs"))
           rmarkdown::render_site(encoding = "UTF-8")
         shell: Rscript {0}
+        
+      - name: Copy redirects and gallery images
+        run: Rscript -e 'fs::file_copy("/_site")'
         
       - name: Commit results
         run: |
