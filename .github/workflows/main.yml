@@ -20,7 +20,8 @@ jobs:
           install.packages(c("flexdashboard", "plotly", "reshape2",
           "zoo", "xts", "dygraphs", "rio", "openxlsx", "parsedate",
           "janitor", "tidyverse", "readr", "forcats",
-          "timetk", "scales", "viridis"))
+          "timetk", "scales", "viridis",
+          "ISOweek"))
           rmarkdown::render_site(encoding = "UTF-8")
         shell: Rscript {0}
         
