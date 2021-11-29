@@ -1,0 +1,1126 @@
+---
+title: "Dashboard"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    logo: finance.png
+    html_document:
+    includes:
+      after_body: footer_new.html
+---
+
+<style>                     
+.navbar {
+  background-color:#004D44;
+  border-color:#004D44;
+}
+.navbar-brand {
+color:#EDECE5!important;
+}
+</style> 
+
+```{r setup, include=FALSE}
+setwd("G:/dashboard")
+# This where we load up all the packages need to run the dashboard.
+library("flexdashboard")
+library("readxl")
+library("plotly")
+library("reshape2")
+library("tidyquant")
+library("quantmod")
+library("TTR")
+library("zoo")
+library("xts")
+library("dygraphs")
+library("rio")
+library("openxlsx")
+library("parsedate")
+library("janitor")
+library("dplyr")
+library("tidyverse")
+library("ggplot2")
+library("readr")
+library("tidyr")
+library("forcats")
+library("timetk")
+library("raster")
+library("viridis")
+library("plotly")
+library("tidyverse")
+library('scales') 
+#This is custom function we use for summing over 14 days
+fnrollsuml <- function (x) {
+  if (length(x) < 14) {
+    rep(NA,length(x)) 
+  } else {
+    rollsum(x,14,align="right",na.pad=TRUE)
+  }
+}
+#This creates the Government of Ireland/DFinance colour scheme for use in GGplots
+govie_colors <- c(
+  `red`        = "#004d44",
+  `green`      = "#a39161",
+  `blue`       = "#00a685",
+  `orange`     = "#0090d4",
+  `yellow`     = "#dbac00")
+govie_cols <- function(...) {
+  cols <- c(...)
+  
+  if (is.null(cols))
+    return (govie_colors)
+  
+  govie_colors[cols]
+}
+
+govie_palettes <- list(
+  `main`  = govie_cols("red", "green", "blue", "orange", "yellow")
+)
+govie_pal <- function(palette = "main", reverse = FALSE, ...) {
+  pal <- govie_palettes[[palette]]
+  
+  if (reverse) pal <- rev(pal)
+  
+  colorRampPalette(pal, ...)
+}
+govie_pal("main")(10)
+
+
+scale_fill_govie <- function(palette = "main", discrete = TRUE, reverse = FALSE, ...) {
+  pal <- govie_pal(palette = palette, reverse = reverse)
+  
+  if (discrete) {
+    discrete_scale("fill", paste0("govie_", palette), palette = pal, ...)
+  } else {
+    scale_fill_gradientn(colours = pal(5), ...)
+  }
+}
+
+
+ 
+ scale_color_govie <- function(palette = "main", discrete = TRUE, reverse = FALSE, ...) {
+   pal <- govie_pal(palette = palette, reverse = reverse)
+   
+   if (discrete) {
+     discrete_scale("colour", paste0("govie_", palette), palette = pal, ...)
+   } else {
+     scale_color_gradientn(colours = pal(5), ...)
+   }
+ }
+#Change xlsx to csv so R can read dates 
+convert("External - Daily spending per country.xlsx", "rev.csv")
+spending <- read_csv("rev.csv")
+#Import old data
+spendapril <- read_csv("dataapril.csv")
+
+#Clean data to remove spaces 
+spending <- clean_names(spending)
+spendingapril <- clean_names(spendapril)
+spendingapril$date <- as.Date(spendingapril$date , format = "%d/%m/%Y")
+
+#Bind old and new data  
+spendmerge <- rbind(spending, spendingapril)
+#Create IE subset of spending data
+spendingIE <- subset(spendmerge, country=="IE",
+                  select=c(country, date, total_spending_per_user_sma7))
+spendingIE <- spendingIE[order(as.Date(spendingIE$date, format="%Y-%m-%Y")),]
+
+rownames(spendingIE) <- NULL
+#Create Index
+spendingIE <- transform(spendingIE, spend_index= (total_spending_per_user_sma7/total_spending_per_user_sma7[7])*100)
+##This is the equivalent line for the central bank data. What this tells R to do is to divide each observation in ‘Spending_on_all_cards’ by the seventh observation (the first 6 are blank because it’s a 7 day average).
+#This summarises the above dataframe into just the last observation for the value box on the summary page
+spendingsum <- spendingIE %>%
+summarise(spending_index=last(spend_index))
+spendingsum <- round(spendingsum, digits=0)
+#ECDC data
+ECDCcovid <- read.csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCcovid <- clean_names(ECDCcovid)
+ECDCcovid$date_rep <- as.Date(ECDCcovid$date_rep , format = "%d/%m/%y")
+#Only EU MSs
+COVID_EU_pop <- subset(ECDCcovid, geo_id=="IE" | geo_id=="BE" | geo_id=="BG" | geo_id=="CZ" | geo_id=="DK" | geo_id=="DE" | geo_id=="EE" | geo_id=="EL" | geo_id=="ES" | geo_id=="FR" | geo_id=="HR" | geo_id=="IT" | geo_id=="CY" | geo_id=="LV" | geo_id=="LT" | geo_id=="LU" | geo_id=="HU" | geo_id=="MT" | geo_id=="NL" | geo_id=="AT" | geo_id=="PL" | geo_id=="PT" | geo_id=="RO" | geo_id=="SI" | geo_id=="SK" | geo_id=="FI" | geo_id=="SE" | geo_id=="UK",
+                       select=c(date_rep, countries_and_territories, pop_data2019))
+#We only use one date because all we want from this data is the population
+COVID_EU_pop <- subset(COVID_EU_pop, date_rep == "2020-12-14")
+
+#Rename to match JHU names
+COVID_EU_pop <- COVID_EU_pop %>% 
+  rename(
+    country = countries_and_territories,
+  )
+COVID_EU_pop <- COVID_EU_pop %>% 
+  mutate(country = ifelse(as.character(country) == "United_Kingdom", "United.Kingdom", as.character(country)))
+#Download JHU data from OWID
+JHU_covid <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_cases.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+JHU_covid <- JHU_covid %>% gather(country, cases, -c(date))
+JHU_covid <- merge(COVID_EU_pop, JHU_covid, by ="country")
+JHU_covid$date_rep <- NULL
+#calculate 14 incidence
+JHU_covid <- JHU_covid %>%
+  group_by(country) %>%
+  mutate(pop100k = pop_data2019/100000)
+JHU_covid$date <- as.Date(JHU_covid$date , format = "%Y-%m-%d")
+JHU_covid <- arrange(JHU_covid, date)
+JHU_covid <- JHU_covid %>% 
+  group_by(country)%>%
+  mutate(cumcases=fnrollsuml(cases))
+JHU_covid <- JHU_covid %>% 
+  mutate(incidence_14day_per_100k = cumcases/pop100k)
+spread_JHU <- spread(JHU_covid, country, incidence_14day_per_100k)
+#write CSV with the output data for our use
+write.csv(spread_JHU, file="cases.csv",row.names=TRUE)
+#IE Only
+COVID_IE <- subset(JHU_covid, country=="Ireland",
+                     select=c(date, incidence_14day_per_100k))
+COVID_IE <- rename(COVID_IE, date = date)
+COVID_IE <- arrange(COVID_IE, date)
+COVID_IE <- na.omit(COVID_IE)
+#summarise to only most recent ob
+incidence <- COVID_IE %>%
+  summarise(incidence14 =last(incidence_14day_per_100k))
+incidence <- round(incidence, digits=0)
+
+weekonweek <- spendingIE %>%
+  mutate(difference = spend_index - lag(spend_index, n=7))
+weekonweek <- weekonweek %>% 
+  summarise(difference=last(difference))
+weekonweek <- round(weekonweek, digits=0)
+#vaccine data
+vax <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/vaccinations/vaccinations.csv")
+vax <- subset(vax, location=="Ireland",
+                     select=c(date, people_vaccinated))
+vax <- mutate(vax, adult_vax=((people_vaccinated/3909809)*100))
+
+vax <- vax %>%
+  summarise(adult_vax=last(adult_vax))
+vax <- round(vax, digits=1)
+
+#R number - we may have to drop this soon!
+rt <- read.csv("https://raw.githubusercontent.com/crondonm/TrackingR/main/Estimates-Database/database.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+rt <-  clean_names(rt)
+rt$date <- as.Date(rt$date, format="%Y-%m-%d")
+rt$r <- round(rt$r,2)
+rt <- subset(rt, country_region=="Ireland" & days_infectious==7)
+rt_ie <- rt %>%
+  summarise(r=last(r))
+```
+
+
+-----------------------------------------------------------------------
+
+Summary
+=============================
+Row 
+------------------------------------
+
+### 14 day incidence per 100,000
+
+```{r}
+incidence=incidence
+valueBox(incidence, icon = "fa-medkit", caption ='COVID-19 14 day incidence per 100k', color = "orange")
+```
+
+### Vaccinations
+
+```{r}
+valueBox(vax, icon = "fa-syringe", caption ="Percentage of eligible population vaccinated", color= "#0090d4")
+
+```
+
+### Reproduction Number (central estimate)
+
+```{r}
+valueBox(rt_ie, icon = "fa-registered", caption ="Estimated Reproduction Number", color= "#a3915e")
+
+```
+
+### Spending Index
+
+```{r}
+spending <- spendingsum
+valueBox(spending, icon = "fa-credit-card", caption ="Revolut Spending Index", color= "#00A685")
+```
+
+
+
+Column 
+
+### Percentage of total population vaccinated
+```{r}
+#This uses weekly data - so we need this package to read week numbers and turn them into dates (which R understands)
+library('ISOweek')
+ECDCVAX <- read.csv("https://opendata.ecdc.europa.eu/covid19/vaccine_tracker/csv/data.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCVAX <- clean_names(ECDCVAX)
+ECDCVAX$week <- paste(ECDCVAX$year_week_iso,"7", sep="-")
+ECDCVAX$week <- ISOweek2date(ECDCVAX$week)
+ECDCVAX$region <- as.character(ECDCVAX$region)
+ECDCVAX$reporting_country <- as.character(ECDCVAX$reporting_country)
+
+
+#Only whole countries- no regions 
+ECDC_vax <- ECDCVAX %>% 
+  group_by(reporting_country) %>%
+  filter(target_group=="ALL") %>% 
+  subset(reporting_country == region)
+
+ECDC_dose1 <- ECDC_vax %>% 
+  group_by(reporting_country) %>% 
+  subset(vaccine =  "COM" | "MOD" | "AZ") %>% 
+  summarise(dose1 = sum(first_dose))
+
+ECDC_dose2 <- ECDC_vax %>% 
+  group_by(reporting_country) %>% 
+  subset(vaccine ="COM" | "MOD" | "AZ") %>% 
+  summarise(dose2 = sum(second_dose))
+ECDC_jans <- ECDC_vax %>% 
+  group_by(reporting_country) %>% 
+  subset(vaccine =="JANSS") %>% 
+  summarise(janss = sum(first_dose))
+#adding the janssen with the two dose jabs to create a fully vaxxed number
+ECDC_full <- merge(ECDC_jans, ECDC_dose2,by="reporting_country")
+ECDC_full <- ECDC_full %>% 
+  mutate(fully_vaccinated = janss + dose2)
+vars <- c("reporting_country", "fully_vaccinated")
+ECDC_fully <- ECDC_full[vars]
+doses<- merge(ECDC_dose1, ECDC_fully, by="reporting_country")
+#extracting population data
+ECDC_pop <- ECDC_vax %>% 
+  group_by(reporting_country) %>%
+  summarise(population = mean(population))
+doses<- merge(doses, ECDC_pop, by="reporting_country")
+#calculating percentages
+doses <- doses %>% 
+  group_by(reporting_country) %>% 
+  mutate(partially_vaccinated = dose1/population*100) %>% 
+  mutate(partially_vaccinated = round(partially_vaccinated, 2)) %>% 
+  mutate(fully_vaccinated = fully_vaccinated/population*100) %>% 
+  mutate(fully_vaccinated = round(fully_vaccinated, 2)) 
+vars <- c("reporting_country", "fully_vaccinated", "partially_vaccinated")
+ECDC_doses <- doses[vars]
+#using this to highlight IE
+ECDC_doses <- ECDC_doses %>% mutate( ToHighlight = ifelse( reporting_country == "IE", "yes", "no" ) )
+ECDC_doses_l <- ECDC_doses %>% gather(statistic, value, -c(reporting_country, ToHighlight))
+ECDC_doses_l1 <- ECDC_doses_l %>% 
+  subset(statistic=="partially_vaccinated")
+#ggplot output
+vax_eu_plot <- ggplot(ECDC_doses_l1, aes(x=reorder(reporting_country, value), y=value, fill=ToHighlight, text=value)) + 
+  geom_bar(stat="identity") +coord_flip() +  scale_fill_manual( values = c( "yes"="#00A685", "no"="gray" ), guide = FALSE ) +theme_minimal() + theme(legend.position='none') + 
+  ylab("Percentage of population vaccinated (at least one dose)") +
+  xlab("")
+#ggplotly to make it interactive
+ggplotly(vax_eu_plot, tooltip = c("text"))
+```
+
+> Source: ECDC. This is expressed as a percentage of the total population rather than the eligible (adult) population.
+
+Column 
+-----------------------------------------------------------------------
+
+### Oxford Stringency Index
+
+```{r}
+#read data from website
+ox <- read.csv(url("https://github.com/OxCGRT/covid-policy-tracker/raw/master/data/timeseries/stringency_index.csv"))
+#subset: only interested in some countries
+ox_comp<- subset(ox, country_code=="IRL" | country_code=="GBR" | country_code=="ESP" | country_code=="ITA" | country_code=="SWE" | country_code=="USA" | country_code=="FRA" | country_code=="DEU", select = -c(country_name, X))
+ox_comp1 <- data.frame(t(ox_comp[-1]))
+colnames(ox_comp1) <- ox_comp[, 1]
+ox_comp1$date <- rownames(ox_comp1)
+
+ox_comp1$date <-as.Date(ox_comp1$date, format = "X%d%b%Y")
+
+#this type of graph needs to have its data in an xts format. This line of code converts the data from a dataframe to an xts object.
+ox_xts <- tk_xts(ox_comp1, select = IRL | GBR | ESP | ITA | SWE | USA | FRA | DEU, date_var = date) 
+dygraph(ox_xts)  %>%
+  dyEvent("2020-03-27", "Lockdown", labelLoc = "bottom") %>%
+  dyEvent("2020-08-07", "Midlands restrictions", labelLoc = "bottom") %>%
+  dyEvent("2020-10-5", "Nationawide L3", labelLoc = "bottom") %>%
+  dyEvent("2020-10-21", "Level 5", labelLoc = "bottom") %>%
+  dyHighlight(highlightCircleSize = 5, 
+              highlightSeriesBackgroundAlpha = 0.5,
+              hideOnMouseOut = TRUE) %>%
+  dyOptions(colors = RColorBrewer::brewer.pal(8, "Dark2")) %>%
+  dySeries("IRL", stepPlot = TRUE, strokeWidth = 5, color = "#00a685", )
+
+
+```
+
+> Source: Oxford Blavatnik School of Government
+
+### COVID-19  14-day Incidence per 100,000 population
+ 
+```{r}
+#This follows the same procedure as the value box  for creating the 14 day incidence rate;
+ECDCcovid <- read.csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCcovid <- clean_names(ECDCcovid)
+ECDCcovid$date_rep <- as.Date(ECDCcovid$date_rep , format = "%d/%m/%y")
+COVID_EU_pop <- subset(ECDCcovid, geo_id=="IE" | geo_id=="BE" | geo_id=="BG" | geo_id=="CZ" | geo_id=="DK" | geo_id=="DE" | geo_id=="EE" | geo_id=="EL" | geo_id=="FR" | geo_id=="HR" | geo_id=="IT" | geo_id=="CY" | geo_id=="LV" | geo_id=="LT" | geo_id=="LU" | geo_id=="HU" | geo_id=="MT" | geo_id=="NL" | geo_id=="AT" | geo_id=="PL" | geo_id=="PT" | geo_id=="RO" | geo_id=="SI" | geo_id=="SK" | geo_id=="FI" | geo_id=="SE" | geo_id=="UK" | geo_id=="IL",
+                       select=c(date_rep, countries_and_territories, pop_data2019))
+COVID_EU_pop <- subset(COVID_EU_pop, date_rep == "2020-12-14")
+
+
+COVID_EU_pop <- COVID_EU_pop %>% 
+  rename(
+    country = countries_and_territories,
+  )
+COVID_EU_pop <- COVID_EU_pop %>% 
+  mutate(country = ifelse(as.character(country) == "United_Kingdom", "United.Kingdom", as.character(country)))
+JHU_covid <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_cases.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+JHU_covid <- JHU_covid %>% gather(country, cases, -c(date))
+JHU_covid <- merge(COVID_EU_pop, JHU_covid, by ="country")
+JHU_covid$date_rep <- NULL
+
+JHU_covid <- JHU_covid %>%
+  group_by(country) %>%
+  mutate(pop100k = pop_data2019/100000)
+JHU_covid$date <- as.Date(JHU_covid$date , format = "%Y-%m-%d")
+JHU_covid <- arrange(JHU_covid, date)
+JHU_covid <- JHU_covid %>% 
+  group_by(country)%>%
+  mutate(cumcases=fnrollsuml(cases))
+JHU_covid <- JHU_covid %>% 
+  mutate(incidence_14day_per_100k = cumcases/pop100k)
+spread_cases <- subset(JHU_covid,
+                        select=c(country, date, incidence_14day_per_100k))
+#in order to be an xts object our data has to be in wide format. This line (Spread) is what we use to switch from long (which is preferrable to wide)
+spread_cases <- spread(spread_cases, country, incidence_14day_per_100k)
+ECDC_xts <- tk_xts(spread_cases, select = Ireland | United.Kingdom | Italy | Sweden | France | Germany , date_var = date) 
+
+dygraph(ECDC_xts) %>%
+  dyOptions(colors = RColorBrewer::brewer.pal(8, "Dark2")) %>%
+  dySeries("Ireland", strokeWidth = 5, color = "#00a685") %>%
+  dyHighlight(highlightCircleSize = 5, 
+              highlightSeriesBackgroundAlpha = 0.5,
+              hideOnMouseOut = TRUE) %>% 
+  dyAxis("y", valueRange = c(0, 2000))
+
+```
+
+> Source: Johns Hopkins University/Our World in Data.
+
+Column
+-----------------------------------------------------------------------
+
+### Google Mobility
+
+```{r}
+#This is where we read in a file saved in GitHub
+mobility_IE <- read.csv("https://raw.githubusercontent.com/eamswe/dashtest/main/mobility.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+mobility_IE <- tail(mobility_IE, -6)
+mobility_IE$date <- as.Date(mobility_IE$date , format = "%Y-%m-%d")
+mobility_IE<- mobility_IE %>% 
+  mutate_if(is.character, as.numeric)
+IE_mob_xts <- tk_xts(mobility_IE, select = retail_recreation | workplaces | grocery_pharmacy | public_transport, date_var = date)
+dygraph(IE_mob_xts) %>% 
+  dySeries("workplaces", strokeWidth = 3, color = "#00a685") %>%
+  dySeries("retail_recreation", strokeWidth = 3, color = "#a3915e") %>%
+  dySeries("grocery_pharmacy", strokeWidth = 3, color = "#004D44") %>%
+  dySeries("public_transport", strokeWidth = 3, color = "#dbac00") %>%
+  dyRangeSelector() %>%
+  dyAxis("y", label = "Change from baseline (Feb avg. per day)")
+
+```
+
+> 7 day moving average. Source: Google.
+
+
+### Epidemiological Situation: Ireland
+
+```{r}
+fnrollsuml <- function (x) {
+  if (length(x) < 14) {
+    rep(NA,length(x)) 
+  } else {
+    rollsum(x,14,align="right",na.pad=TRUE)
+  }
+}
+#This follows a similar procedure as the cross country chart but for IE only
+
+ECDCcovid <- read.csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCcovid <- clean_names(ECDCcovid)
+ECDCcovid$date_rep <- as.Date(ECDCcovid$date_rep , format = "%d/%m/%y")
+COVID_EU_pop <- subset(ECDCcovid, geo_id=="IE" | geo_id=="BE" | geo_id=="BG" | geo_id=="CZ" | geo_id=="DK" | geo_id=="DE" | geo_id=="EE" | geo_id=="EL" | geo_id=="ES" | geo_id=="FR" | geo_id=="HR" | geo_id=="IT" | geo_id=="CY" | geo_id=="LV" | geo_id=="LT" | geo_id=="LU" | geo_id=="HU" | geo_id=="MT" | geo_id=="NL" | geo_id=="AT" | geo_id=="PL" | geo_id=="PT" | geo_id=="RO" | geo_id=="SI" | geo_id=="SK" | geo_id=="FI" | geo_id=="SE" | geo_id=="UK",
+                       select=c(date_rep, countries_and_territories, pop_data2019))
+COVID_EU_pop <- subset(COVID_EU_pop, date_rep == "2020-12-14")
+
+
+COVID_EU_pop <- COVID_EU_pop %>% 
+  rename(
+    country = countries_and_territories,
+  )
+COVID_EU_pop <- COVID_EU_pop %>% 
+  mutate(country = ifelse(as.character(country) == "United_Kingdom", "United.Kingdom", as.character(country)))
+JHU_covid <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_cases.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+JHU_covid <- JHU_covid %>% gather(country, cases, -c(date))
+JHU_covid <- merge(COVID_EU_pop, JHU_covid, by ="country")
+JHU_covid$date_rep <- NULL
+
+JHU_covid <- JHU_covid %>%
+  group_by(country) %>%
+  mutate(pop100k = pop_data2019/100000)
+JHU_covid$date <- as.Date(JHU_covid$date , format = "%Y-%m-%d")
+JHU_covid <- arrange(JHU_covid, date)
+JHU_covid <- JHU_covid %>% 
+  group_by(country)%>%
+  mutate(cumcases=fnrollsuml(cases))
+JHU_covid <- JHU_covid %>% 
+  mutate(incidence_14day_per_100k = cumcases/pop100k)
+
+JHU_covid1 <- subset(JHU_covid, country=="Ireland",
+                    select=c(date, cases))
+JHU_covid1[is.na(JHU_covid1)] <- 0
+JHU_covid1<- JHU_covid1 %>%
+  mutate(cum_sum = cumsum(cases))
+
+write.csv(JHU_covid1, file="cumulcases.csv",row.names=TRUE)
+
+
+
+JHU_covid <- subset(JHU_covid, country=="Ireland",
+                    select=c(date, incidence_14day_per_100k))
+
+
+
+JHU_deaths <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_deaths.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+JHU_deaths <- JHU_deaths %>% gather(country, deaths, -c(date))
+JHU_deaths <- merge(COVID_EU_pop, JHU_deaths, by ="country")
+JHU_deaths$date_rep <- NULL
+
+JHU_deaths <- JHU_deaths %>%
+  group_by(country) %>%
+  mutate(pop100k = pop_data2019/100000)
+JHU_deaths$date <- as.Date(JHU_deaths$date , format = "%Y-%m-%d")
+JHU_deaths <- arrange(JHU_deaths, date)
+JHU_deaths <- JHU_deaths %>% 
+  group_by(country)%>%
+  mutate(cumdeaths=fnrollsuml(deaths))
+JHU_deaths <- JHU_deaths %>% 
+  mutate(deaths_14day_per_100k = cumdeaths/pop100k)
+spread_deaths <- subset(JHU_deaths,
+                     select=c(country, date, deaths_14day_per_100k))
+spread_deaths <- spread(spread_deaths, country, deaths_14day_per_100k)
+write.csv(spread_deaths, file="deaths.csv", row.names=TRUE)
+
+JHU_deaths <- subset(JHU_deaths, country=="Ireland",
+                     select=c(date, deaths_14day_per_100k))
+
+JHU_IE <- merge(JHU_deaths, JHU_covid, by="date")
+
+
+JHU_IE <- JHU_IE %>% 
+  rename(
+    "14 day fatalities per 100,000" = deaths_14day_per_100k,
+    "14 day incidence rate per 100,000" = incidence_14day_per_100k
+  )
+
+IE_xts <- tk_xts(JHU_IE, select = `14 day fatalities per 100,000` |  `14 day incidence rate per 100,000`, date_var = date) 
+dygraph(IE_xts) %>%
+  dyOptions(colors = RColorBrewer::brewer.pal(8, "Dark2")) %>%
+  dyAxis("y", label = "Cases")%>%
+  dyAxis("y2", label = "Deaths ") %>%
+  dySeries("14 day fatalities per 100,000", axis=('y2'))
+
+```
+
+> Source: Johns Hopkins University/Our World in Data
+
+
+Mobility 
+=============================
+```{r setup1, include=FALSE}
+residentialsum <- mobility_IE %>%
+  summarise(residential =last(residential))
+residentialsum <- round(residentialsum, digits=0)
+
+
+workplacessum <- mobility_IE %>%
+  summarise(workplaces =last(workplaces))
+workplacessum <- round(workplacessum, digits=0)
+
+
+retailsum <- mobility_IE %>%
+  summarise(retail_recreation =last(retail_recreation))
+retailsum <- round(retailsum, digits=0)
+
+transportsum <- mobility_IE %>%
+  summarise(transportsum =last(public_transport))
+transportsum <- round(transportsum, digits=0)
+```
+
+Row 
+------------------------------------
+
+### Workplaces
+
+```{r}
+valueBox(workplacessum, icon = "fa-building", caption ='Workplaces', color = "#00a685")
+```
+
+### Public Transport
+
+```{r}
+
+valueBox(transportsum, icon = "fa-bus-alt", caption ="Public Transport", color= "#dbac00")
+```
+
+### Retail and Recreation
+
+```{r}
+
+valueBox(value = retailsum,icon = "fa-shopping-bag",caption = "Retail and Recreation", color = "#a3915e")
+```
+
+
+### Residential
+
+```{r}
+
+valueBox(value = residentialsum,icon = "fa-home",caption = "Residential", color =  "#0090d4")
+```
+
+
+Column {data-height=800}
+-----------------------------------------------------------------------
+
+### Google Mobility Data
+```{r}
+mobility_IE <- read.csv("https://raw.githubusercontent.com/eamswe/dashtest/main/mobility.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+mobility_IE <- tail(mobility_IE, -6)
+mobility_IE$date <- as.Date(mobility_IE$date , format = "%Y-%m-%d")
+mobility_IE<- mobility_IE %>% 
+  mutate_if(is.character, as.numeric)
+IE_mob_xts <- tk_xts(mobility_IE, select = retail_recreation | workplaces | grocery_pharmacy | public_transport, date_var = date)
+dygraph(IE_mob_xts) %>% 
+  dySeries("workplaces", strokeWidth = 3, color = "#00a685") %>%
+  dySeries("retail_recreation", strokeWidth = 3, color = "#a3915e") %>%
+  dySeries("grocery_pharmacy", strokeWidth = 3, color = "#004D44") %>%
+  dySeries("public_transport", strokeWidth = 3, color = "#dbac00") %>%
+  dyRangeSelector() %>%
+  dyAxis("y", label = "Change from baseline (Feb avg. per day)")
+
+
+```
+
+> 7 Day moving average. Source: Google
+
+
+
+Revolut
+=============================
+
+
+Row {data-height=600}
+------------------------------------------------------------------------------
+
+### Revolut Spending Index
+
+```{r}
+#This is just the graph as we have done all the manipulation above
+
+IExts <- tk_xts(spendingIE, select = spend_index, date_var = date)
+dygraph(IExts) %>%
+  dyEvent("2020-03-13","Schools Close", labelLoc = "bottom") %>%
+  dyEvent("2020-05-18", "Re-opening Phase 1", labelLoc = "bottom") %>%
+  dyEvent("2020-06-08", "Phase 2", labelLoc = "bottom") %>%
+  dyEvent("2020-06-28", "Phase 3", labelLoc = "bottom") %>%
+  dyEvent("2020-10-21", "Level 5", labelLoc = "bottom") %>%
+ dyEvent("2020-12-01", "Retail re-opens", labelLoc = "bottom") %>%
+       dyEvent("2020-12-30", "Full Level 5", labelLoc = "bottom") %>%
+  dyEvent("2021-05-17", "Retail re-opens", labelLoc = "bottom") %>%
+  dyEvent("2021-06-07", "Outdoor Hospitality re-opems", labelLoc = "bottom") %>% 
+  dyAxis("y", label = "Spending per user (indexed to Feb avg.)") %>%
+  dyOptions(axisLineWidth = 1.5, fillGraph = TRUE)
+
+```
+
+> 7 day moving average, spending per user, Indexed to early February 2020. Source: Revolut.
+
+Row {data-height=500}
+------------------------------------------------------------------------------
+
+### Cross Country Spending
+
+```{r}
+spendingEU <- subset(spendmerge,
+                     select=c(country, date, relative_spending_per_user_sma7))
+spread_spend <- spread(spendingEU, country, relative_spending_per_user_sma7)
+crosscountry <- tk_xts(spread_spend, date_var = date)
+dygraph(crosscountry) %>%
+  dySeries("IE", strokeWidth = 3, color = "#00a685") %>%
+  dyAxis("y", label = "spending per user (indexed to Feb avg.)")
+  
+```
+
+> 7 day moving average, spending per user. Source: Revolut
+
+### Online & Offline Spending Proportion
+
+```{r}
+
+setwd("G:/dashboard")
+convert("External - Proportion of daily spending that is online v offline per country.xlsx", "onlineoffline.csv")
+onlineoffline <- read.csv('onlineoffline.csv')
+onlineoffline <- clean_names(onlineoffline)
+#Bind old and new data  
+onoffmar <- read.csv('offon.csv') #this is the old data
+onoffmar <- clean_names(onoffmar)
+onlineoffline <- rbind(onoffmar, onlineoffline)
+#Create IE subset of spending data
+onlineoffline <- subset(onlineoffline, country=="IE",
+                     select=c(date, physical_spending_sma7, online_spending_sma7))
+onlineoffline$date <- as.Date(onlineoffline$date)
+rownames(onlineoffline) <- NULL
+split <- tk_xts(onlineoffline, date_var = date)
+dygraph(split) %>%
+  dyAxis("y", label = "percentage of spending")
+
+```
+
+> 7 day moving averages. Source: Revolut
+
+
+
+ COVID-19
+=============================
+Row 
+-----------------------------------------
+### Estimated Reproduction Number for Ireland 
+```{r}
+rt <-  clean_names(rt)
+rt$date <- as.Date(rt$date, format="%Y-%m-%d")
+rt$r <- round(rt$r,2)
+rt$ci_65_l <- round(rt$ci_65_l,2)
+rt$ci_65_u <- round(rt$ci_65_u,3)
+
+rt <- subset(rt, country_region=="Ireland" & days_infectious==7)
+
+rt_xts <- tk_xts(rt, select= ci_95_l | r | ci_95_u, date_var = date)
+dygraph(rt_xts) %>% 
+  dySeries(c("ci_95_l", "r", "ci_95_u"), label = "Central Estimate")
+
+```
+
+> Source: Arroyo-Marioli et al, 2020. 95% confidence intervals are shaded. This is an an unofficial estimated derived from publicly reported data using an SEIR model and should be treated with caution. The work of the Irish Epidemiological Modelling Advisory Group (IEMAG) should be consulted for authoritative estimates.
+
+### 7 day average cases: Ireland
+
+```{r}
+fnrollsuml <- function (x) {
+  if (length(x) < 7) {
+    rep(NA,length(x)) 
+  } else {
+    rollsum(x,7,align="right",na.pad=TRUE)
+  }
+}
+
+
+JHU_covid <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_cases.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+JHU_covid <- JHU_covid %>% gather(country, cases, -c(date))
+
+JHU_covid$date <- as.Date(JHU_covid$date , format = "%Y-%m-%d")
+JHU_covid <- arrange(JHU_covid, date)
+JHU_covid <- JHU_covid %>% 
+  group_by(country)%>%
+  mutate(cumcases=fnrollsuml(cases))
+JHU_covid <- JHU_covid %>% 
+  mutate(incidence_14day_per_100k = cumcases/7)
+
+JHU_covid1 <- subset(JHU_covid, country=="Ireland",
+                    select=c(date, cases))
+JHU_covid1[is.na(JHU_covid1)] <- 0
+
+
+JHU_covid <- subset(JHU_covid, country=="Ireland",
+                    select=c(date, incidence_14day_per_100k))
+
+
+JHU_IE <-JHU_covid
+
+
+JHU_IE <- JHU_IE %>% 
+  rename(
+    "7 day average cases" = incidence_14day_per_100k
+  )
+
+IE_xts <- tk_xts(JHU_IE, date_var = date) 
+dygraph(IE_xts) %>%
+  dySeries("7 day average cases", strokeWidth = 3, color = "#00a685")
+
+```
+
+> Source: Our World in Data using Department of Health data.
+
+Row 
+-----------------------------------------
+### 14 day incidence per 100,000 [JHU]
+```{r}
+fnrollsuml <- function (x) {
+  if (length(x) < 14) {
+    rep(NA,length(x)) 
+  } else {
+    rollsum(x,14,align="right",na.pad=TRUE)
+  }
+}
+
+ECDCcovid <- read.csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCcovid <- clean_names(ECDCcovid)
+ECDCcovid$date_rep <- as.Date(ECDCcovid$date_rep , format = "%d/%m/%y")
+COVID_EU_pop <- subset(ECDCcovid, geo_id=="IE" | geo_id=="BE" | geo_id=="BG" | geo_id=="CZ" | geo_id=="DK" | geo_id=="DE" | geo_id=="EE" | geo_id=="EL" | geo_id=="ES" | geo_id=="FR" | geo_id=="HR" | geo_id=="IT" | geo_id=="CY" | geo_id=="LV" | geo_id=="LT" | geo_id=="LU" | geo_id=="HU" | geo_id=="MT" | geo_id=="NL" | geo_id=="AT" | geo_id=="PL" | geo_id=="PT" | geo_id=="RO" | geo_id=="SI" | geo_id=="SK" | geo_id=="FI" | geo_id=="SE" | geo_id=="UK",
+                       select=c(date_rep, countries_and_territories, pop_data2019))
+COVID_EU_pop <- subset(COVID_EU_pop, date_rep == "2020-12-14")
+
+
+COVID_EU_pop <- COVID_EU_pop %>% 
+  rename(
+    country = countries_and_territories,
+  )
+COVID_EU_pop <- COVID_EU_pop %>% 
+  mutate(country = ifelse(as.character(country) == "United_Kingdom", "United.Kingdom", as.character(country)))
+JHU_covid <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_cases.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+JHU_covid <- JHU_covid %>% gather(country, cases, -c(date))
+JHU_covid <- merge(COVID_EU_pop, JHU_covid, by ="country")
+JHU_covid$date_rep <- NULL
+
+JHU_covid <- JHU_covid %>%
+  group_by(country) %>%
+  mutate(pop100k = pop_data2019/100000)
+JHU_covid$date <- as.Date(JHU_covid$date , format = "%Y-%m-%d")
+JHU_covid <- arrange(JHU_covid, date)
+JHU_covid <- JHU_covid %>% 
+  group_by(country)%>%
+  mutate(cumcases=fnrollsuml(cases))
+JHU_covid <- JHU_covid %>% 
+  mutate(incidence_14day_per_100k = cumcases/pop100k)
+spread_cases <- subset(JHU_covid,
+                        select=c(country, date, incidence_14day_per_100k))
+spread_cases <- spread(spread_cases, country, incidence_14day_per_100k)
+write.csv(spread_cases, file="cases.csv",row.names=TRUE)
+
+casesxt <- tk_xts(spread_cases, date_var = date)
+dygraph(casesxt) %>%
+  dySeries("Ireland", strokeWidth = 3, color = "#00a685") %>%
+  dyLegend(width = 700)
+
+```
+
+> Source: Our World in Data, Dept of Finance calculations. 
+
+Row 
+-----------------------------------------
+### 14 day cumulative deaths per million [JHU]
+```{r}
+JHU_deaths<- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_deaths_per_million.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+JHU_deaths <- JHU_deaths %>% gather(country, deaths_per_mill, -c(date))
+JHU_deaths <- merge(COVID_EU_pop, JHU_deaths, by ="country")
+JHU_deaths$date_rep <- NULL
+
+
+JHU_deaths$date <- as.Date(JHU_deaths$date , format = "%Y-%m-%d")
+JHU_deaths <- arrange(JHU_deaths, date)
+JHU_deaths<- JHU_deaths %>% 
+  group_by(country)%>%
+  mutate(day_14_deaths_per_mill=fnrollsuml(deaths_per_mill))
+
+spread_deaths <- subset(JHU_deaths,
+                       select=c(country, date, day_14_deaths_per_mill))
+spread_deaths <- spread(spread_deaths, country, day_14_deaths_per_mill)
+deathsxts <- tk_xts(spread_deaths, date_var = date)
+dygraph(deathsxts) %>%
+  dySeries("Ireland", strokeWidth = 5, color = "#00a685")
+
+```
+
+> Source: Our World in Data, Dept of Finance calculations. 
+
+Row 
+-----------------------------------------
+### Hospitalised cases per 100,000 [ECDC]
+```{r}
+COVID_EU_pop <- subset(ECDCcovid, geo_id=="IE" | geo_id=="BE" | geo_id=="CZ" | geo_id=="DK" | geo_id=="DE" | geo_id=="EL" | geo_id=="ES" | geo_id=="FR" | geo_id=="HR" | geo_id=="IT" | geo_id=="NL" | geo_id=="AT" | geo_id=="PT"| geo_id=="FI" | geo_id=="SE" | geo_id=="UK",
+                         select=c(date_rep, countries_and_territories, pop_data2019))
+COVID_EU_pop <- subset(COVID_EU_pop, date_rep == "2020-12-14")
+
+COVID_EU_pop <- COVID_EU_pop %>% 
+  rename(
+    country = countries_and_territories,
+  )
+ECDCcovidhospital <- read.csv("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv/data.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCcovidhospital <- merge(COVID_EU_pop, ECDCcovidhospital, by ="country")
+ECDC_hospital_occupancy <- subset(ECDCcovidhospital, indicator == "Daily hospital occupancy")
+ECDC_hospital_occupancy  <- ECDC_hospital_occupancy  %>% 
+  mutate(pop100k=pop_data2019/100000)
+ECDC_hospital_occupancy  <- ECDC_hospital_occupancy  %>% 
+  mutate(occupancy_per_100k=value/pop100k)
+ECDC_hospital_occupancy<- subset(ECDC_hospital_occupancy, select=c(country, date, occupancy_per_100k))
+spread_hosp <- spread(ECDC_hospital_occupancy, country, occupancy_per_100k)
+spread_hosp$date <- as.Date(spread_hosp$date)
+hospxt <- tk_xts(spread_hosp, date_var = Date)
+dygraph(hospxt) %>%
+  dySeries("Ireland", strokeWidth = 3, color = "#00a685")
+write.csv(spread_hosp, file="hosp.csv")
+```
+
+> Source: ECDC, Dept of Finance calculations. 
+
+### ICU Patients per 100,000 [ECDC]
+```{r}
+ECDC_ICU_occupancy <- subset(ECDCcovidhospital, indicator == "Daily ICU occupancy")
+ECDC_ICU_occupancy  <- ECDC_ICU_occupancy  %>% 
+  mutate(pop100k=pop_data2019/100000)
+ECDC_ICU_occupancy  <- ECDC_ICU_occupancy  %>% 
+  mutate(ICUoccupancy_per_100k=value/pop100k)
+ECDC_ICU_occupancy<- subset(ECDC_ICU_occupancy, select=c(country, date, ICUoccupancy_per_100k))
+spread_ICU <- spread(ECDC_ICU_occupancy, country, ICUoccupancy_per_100k)
+spread_ICU$date <- as.Date(spread_ICU$date)
+ICUxt <- tk_xts(spread_ICU, date_var = date)
+dygraph(ICUxt) %>%
+  dySeries("Ireland", strokeWidth = 3, color = "#00a685") 
+```
+
+> Source: ECDC, Dept of Finance calculations. 
+
+Row 
+-----------------------------------------
+### Tests carried out per thousand population [OWID]
+```{r}
+testing <- read.csv(url("https://github.com/owid/covid-19-data/raw/master/public/data/testing/covid-testing-all-observations.csv"))
+testing <- clean_names(testing)
+testing <- subset(testing, iso_code=="AUT" | iso_code=="BEL" | iso_code=="CZE" | iso_code=="DNK" | iso_code=="EST" | iso_code=="FIN" | iso_code=="FRA" | iso_code=="DEU" | iso_code=="IRL" | iso_code=="ITA"| iso_code=="NLD" | iso_code=="PRT" | iso_code=="ESP" | iso_code=="SWE" | iso_code=="GBR")
+testing <-  subset(testing, entity!="France - people tested")
+testing <-  subset(testing, entity!="Italy - people tested")
+testing <-  subset(testing, entity!="Poland - people tested")
+testing$date <- as.Date(testing$date , format = "%Y-%m-%d")
+testing <- testing %>% group_by(iso_code) %>%
+  mutate(change_in_cumulative_total_per_thousand_ma = zoo::rollmeanr(daily_change_in_cumulative_total_per_thousand, 7, fill = NA))
+testing <- testing %>% group_by(iso_code) %>%
+  mutate(positivity_rate_ma = zoo::rollmeanr(short_term_positive_rate, 7, fill = NA))
+
+
+
+testing_tests_per_thousand <- subset(testing, select=c(date, iso_code, x7_day_smoothed_daily_change_per_thousand))
+testing_tests_per_thousand <- spread(testing_tests_per_thousand, iso_code, x7_day_smoothed_daily_change_per_thousand)
+testingxt <- tk_xts(testing_tests_per_thousand, date_var = date)
+dygraph(testingxt) %>%
+  dySeries("IRL", strokeWidth = 3, color = "#00a685")
+
+```
+
+> Source: Our World in Data, Dept of Finance calculations. 
+
+### Test positivity rates [OWID]
+```{r}
+testing_positive_rate <- subset(testing, select=c(date, iso_code, positivity_rate_ma))
+testing_positive_rate <- spread(testing_positive_rate, iso_code, positivity_rate_ma)
+
+positivext <- tk_xts(testing_positive_rate, date_var = date)
+dygraph(positivext) %>%
+  dySeries("IRL", strokeWidth = 3, color = "#00a685") %>%
+  dyAxis("y", label = "proportion of tests returned positive")
+
+```
+
+> Source: Our World in Data, Dept of Finance calculations. 
+
+ Vaccinations
+=============================
+Row 
+-----------------------------------------
+### Percentage of population vaccinated
+```{r}
+library('ISOweek')
+ECDCVAX <- read.csv("https://opendata.ecdc.europa.eu/covid19/vaccine_tracker/csv/data.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCVAX <- clean_names(ECDCVAX)
+ECDCVAX$week <- paste(ECDCVAX$year_week_iso,"1", sep="-")
+ECDCVAX$week <- ISOweek2date(ECDCVAX$week)
+ECDC_vax <- ECDCVAX %>% 
+  group_by(reporting_country) %>%
+  filter(target_group=="ALL") %>% 
+  subset(reporting_country == region)
+
+ECDC_dose1 <- ECDC_vax %>% 
+  group_by(reporting_country) %>% 
+  subset(vaccine =  "COM" | "MOD" | "AZ") %>% 
+  summarise(dose1 = sum(first_dose))
+
+ECDC_dose2 <- ECDC_vax %>% 
+  group_by(reporting_country) %>% 
+  subset(vaccine ="COM" | "MOD" | "AZ") %>% 
+  summarise(dose2 = sum(second_dose))
+ECDC_jans <- ECDC_vax %>% 
+  group_by(reporting_country) %>% 
+  subset(vaccine =="JANSS") %>% 
+  summarise(janss = sum(first_dose))
+
+ECDC_full <- merge(ECDC_jans, ECDC_dose2,by="reporting_country")
+ECDC_full <- ECDC_full %>% 
+  mutate(fully_vaccinated = janss + dose2)
+vars <- c("reporting_country", "fully_vaccinated")
+ECDC_fully <- ECDC_full[vars]
+doses<- merge(ECDC_dose1, ECDC_fully, by="reporting_country")
+
+ECDC_pop <- ECDC_vax %>% 
+  group_by(reporting_country) %>%
+  summarise(population = mean(population))
+doses<- merge(doses, ECDC_pop, by="reporting_country")
+doses <- doses %>% 
+  group_by(reporting_country) %>% 
+  mutate(partially_vaccinated = dose1/population*100) %>% 
+  mutate(partially_vaccinated = round(partially_vaccinated, 2)) %>% 
+  mutate(fully_vaccinated = fully_vaccinated/population*100) %>% 
+  mutate(fully_vaccinated = round(fully_vaccinated, 2)) 
+vars <- c("reporting_country", "fully_vaccinated", "partially_vaccinated")
+ECDC_doses <- doses[vars]
+ECDC_doses <- ECDC_doses %>% mutate( ToHighlight = ifelse( reporting_country == "IE", "yes", "no" ) )
+ECDC_doses <- ECDC_doses %>% 
+  ungroup() %>% 
+  mutate(position = rank(fully_vaccinated))
+ECDC_doses_l <- ECDC_doses %>% gather(statistic, value, -c(reporting_country, ToHighlight, position))
+xcountry <- ggplot(ECDC_doses_l, aes(fill=statistic, y=reorder(reporting_country, position), x=value, text=paste("</br> Country:", reporting_country,
+                                                                                              "</br>", statistic, ":", value, "%"))) + 
+  geom_bar(position="dodge",stat ="identity") +xlab ("Percentage of population") + ylab("Country") + scale_fill_govie()
+ggplotly(xcountry, tooltip = c("text"))
+
+```
+
+> Source: ECDC, Dept of Finance calculations. 
+
+Row 
+-----------------------------------------
+### Vaccination by age groups: Ireland
+```{r}
+
+ECDC_IE <- ECDCVAX %>% 
+  group_by(target_group) %>% 
+  subset(reporting_country ==  "IE") %>% 
+  subset(vaccine =  "COM" | "MOD" | "AZ") %>%
+  summarise(partially_vaccinated = sum(first_dose)) 
+
+ECDC_IE <- filter(ECDC_IE, target_group == "Age15_17" | target_group == "Age18_24" | target_group == "Age25_49" |target_group == "Age50_59"|target_group == "Age60_69" |target_group == "Age70_79" |target_group == "Age80+")
+
+ECDC_IE_2 <- ECDCVAX %>% 
+  group_by(target_group) %>% 
+  subset(reporting_country ==  "IE") %>% 
+  subset(vaccine =  "COM" | "MOD" | "AZ") %>%
+  summarise(dose2 = sum(second_dose)) 
+
+ECDC_IE_2 <- filter(ECDC_IE_2, target_group == "Age15_17" | target_group == "Age18_24" | target_group == "Age25_49" |target_group == "Age50_59"|target_group == "Age60_69" |target_group == "Age70_79" |target_group == "Age80+")
+
+ECDC_IE_j <- ECDCVAX %>% 
+  group_by(target_group) %>% 
+  subset(reporting_country ==  "IE") %>% 
+  subset(vaccine ==  "JANSS") %>%
+  summarise(dose = sum(first_dose)) 
+
+ECDC_IE_j <- filter(ECDC_IE_j, target_group == "Age15_17" | target_group == "Age18_24" | target_group == "Age25_49" |target_group == "Age50_59"|target_group == "Age60_69" |target_group == "Age70_79" |target_group == "Age80+")
+
+ECDC_IE_full <-  inner_join(ECDC_IE_j, ECDC_IE_2, by = "target_group")
+ECDC_IE_full <- mutate(ECDC_IE_full, fully_vaccinated= dose +dose2)
+ECDC_IE_full <- subset(ECDC_IE_full, select=c(target_group, fully_vaccinated))
+
+ECDC_pop_IE <- ECDCVAX %>% 
+  group_by(target_group) %>%
+  subset(reporting_country=="IE") %>% 
+  summarise(denominator = mean(denominator)) 
+
+ECDC_IE_p <- inner_join(ECDC_pop_IE, ECDC_IE, by="target_group")
+ECDC_IE_p <- inner_join(ECDC_IE_p, ECDC_IE_full, by="target_group")
+age_props <- ECDC_IE_p %>% 
+  mutate(fully_vaccinated = fully_vaccinated/denominator*100) %>% 
+  mutate(partially_vaccinated = partially_vaccinated/denominator*100) %>% 
+  mutate(fully_vaccinated = round(fully_vaccinated, 2)) %>% 
+  mutate(partially_vaccinated = round(partially_vaccinated, 2))
+age_props_l <- age_props %>% gather(group, proportion, -c(target_group, denominator))
+age_props <- ggplot(age_props_l, aes(fill=group, y=target_group, x=proportion, text=paste("</br> Group:", target_group,
+                                                                             " </br> Status", group,
+                                                                             "</br> Proportion vaccinated: ", proportion, "%"))) + 
+  geom_bar(position="dodge",stat ="identity") + ylab("Age Group") + xlab("") + scale_fill_govie()
+
+ggplotly(age_props, tooltip = c("text"))
+```
+
+> Source: ECDC, Dept of Finance calculations. Age cohort populations are estimates.
+
+### Weekly Vaccinations: Ireland
+```{r}
+ECDC_cumulative <- ECDCVAX %>% 
+  subset(reporting_country ==  "IE") %>% 
+  subset(target_group == "ALL") %>% 
+  mutate(vaccines_administered = first_dose + second_dose) %>% 
+  group_by(vaccine) %>% 
+  mutate(total = cumsum(vaccines_administered)) 
+ECDC_cumulative$vaccine <- gsub('COM', 'Pfizer', ECDC_cumulative$vaccine)
+ECDC_cumulative$vaccine <- gsub('JANSS', 'J&J', ECDC_cumulative$vaccine)
+ECDC_cumulative$vaccine <- gsub('MOD', 'Moderna', ECDC_cumulative$vaccine)
+ECDC_cumulative$vaccine <- gsub('UNK', 'Unknown', ECDC_cumulative$vaccine)
+
+
+
+
+weekly_graph <- ggplot(ECDC_cumulative, aes(fill=vaccine, y=vaccines_administered, x=week, text=paste("</br> Week:", week,
+                                                                                                     " </br> Vaccine:", vaccine,
+                                                                                                      "</br> Quantity: ", vaccines_administered))) +
+  geom_bar(position = "stack", stat = "identity") +
+  scale_y_continuous(labels = comma) +
+  ylab("Vaccines administered") +
+  xlab("") + scale_fill_govie()
+ggplotly(weekly_graph, tooltip = c("text"))
+```
+
+> Source: ECDC, Dept of Finance calculations. There may be a reporting delay for vaccinations carried out in some settings.
+
+
+ Indeed
+=============================
+Row 
+-----------------------------------------
+### Total and New Job Postings: Ireland
+```{r}
+indeed <- read.csv(url("https://raw.githubusercontent.com/hiring-lab/data/master/IE/aggregate_job_postings_IE.csv"))
+indeed <-  spread(indeed, variable, pct_chng_feb_1)
+indeed$date <- as.Date(indeed$date , format = "%Y-%m-%d")
+indeed <- clean_names(indeed)
+indeed_xts <- tk_xts(indeed, select = new_postings | total_postings, date_var = date)
+dygraph(indeed_xts)
+```
+
+> Source: Indeed.
+
+Row 
+-----------------------------------------
+
+### What does this chart show?
+This chart shows the percentage change in seasonally-adjusted job postings on the hiring website Indeed since February 1, 2020, using a seven-day trailing average. February 1, 2020, is used as the pre-pandemic baseline. Total job postings uses the daily postings visible on Indeed, averaged over a week or a month.  For the flow of new postings they count job postings only when they are first visible. More details are available [here](https://www.hiringlab.org/indeed-data-faq/).
+
+ FAQs
+=============================
+Row 
+-----------------------------------------
+### Why are some of the statistics here different than the Department of Health GeoHive Covid data hub?
+The Department of Health GeoHive Covid data hub and the HPSC should be considered the authoritative sources of data on Covid-19 in Ireland. Some of the statistics here may vary because they’ve been sourced from cross country datasets like those from the ECDC and Our World in Data dataset. This means there may be delays or small discrepancies between the two datasets and some of the calculations used.
+
+### What are the sources for this data? Can I download it?
+The sources for each of the raw datasets used in this chart are listed below the relevant charts.
+
+### Why is the Department of Finance publishing this?
+The dashboard is a collection of some of the sources of high frequency data on the Irish economy and epidemiological situation monitored by the Department during the pandemic. 
+
+As the economy recovers and society re-opens the dashboard aims to be a useful tool for tracking aspects of Ireland’s economic performance. These indicators provide a snapshot of trends and directions of travel and shouldn’t be used as substitutes for the official economic statistics published by the CSO.
+
+Row 
+-----------------------------------------
+###	How is the mobility data collected?
+Mobility data is collected by Google, using anonymised aggregated location information from users of its services. For more information on how this data is collected see https://www.google.com/covid19/mobility/
+
+###	Who can I contact with a question?
+You can contact the Economics division of the Department of Finance at economics@finance.gov.ie.
+
+###	How did you pick the countries to appear in the charts?
+The countries that appear in these charts were chosen to provide a high level overview and comparison of the experience of major trading partners and neighboring countries, particularly in the European Union. In some instances all member states are included whereas in others for clarity a smaller selection of countries including non-EU countries like the UK and US are included.
+
+Row 
+-----------------------------------------
+###	How has this data been affected by the recent HSE Cyberattack?
+The recent IT attack affected the reporting of COVID-19 cases, hospitalisations, and deaths in Ireland. In particular , this is the case for mortality reporting where there remains a data gap due to the pause in the reporting of deaths. It's envisaged that for these the back series for cases and deaths will be revised once the relevant systems become available again.
+
+
