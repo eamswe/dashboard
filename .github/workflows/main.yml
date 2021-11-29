@@ -22,8 +22,6 @@ jobs:
           rmarkdown::render("BETA_20210714_editcomments_03.Rmd")
         shell: Rscript {0}
         
-      - name: Copy redirects and gallery images
-        run: Rscript -e 'fs::file_copy("/_site")'
         
       - name: Commit results
         run: |
