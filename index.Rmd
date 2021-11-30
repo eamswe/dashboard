@@ -189,7 +189,7 @@ cbi_total <- subset(cbi_total, select = c(Spending_on_all_cards))
 ##This is the equivalent line for the central bank data. What this tells R to do is to divide each observation in ‘Spending_on_all_cards’ by the seventh observation (the first 6 are blank because it’s a 7 day average).
 #This summarises the above dataframe into just the last observation for the value box on the summary page
 spendingsum <- cbi_total %>%
-summarise(cbi_total=last(cbi_total))
+summarise(cbi_total=last(Spending_on_all_cards))
 spendingsum <- round(spendingsum, digits=0)
 ```
 
