@@ -27,4 +27,4 @@ jobs:
         run: |
           git add -A
           git commit -m 'Rebuild site' || echo "No changes to commit"
-          git push origin || echo "No changes to commit"
+          git push origin --force || echo "No changes to commit"
