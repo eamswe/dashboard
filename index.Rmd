@@ -211,7 +211,7 @@ valueBox(incidence, icon = "fa-medkit", caption ='COVID-19 14 day incidence per 
 ### Vaccinations
 
 ```{r}
-valueBox(vax, icon = "fa-syringe", caption ="Percentage of eligible population vaccinated", color= "#0090d4")
+valueBox(vax, icon = "fa-syringe", caption ="Percentage of population vaccinated", color= "#0090d4")
 
 ```
 
