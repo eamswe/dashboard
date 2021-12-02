@@ -388,7 +388,7 @@ JHU_covid <- JHU_covid %>%
   mutate(incidence_14day_per_100k = cumcases/pop100k)
 
 JHU_covid1 <- subset(JHU_covid, country=="Ireland",
-                    select=c(date, cases))
+                     select=c(date, cases))
 JHU_covid1[is.na(JHU_covid1)] <- 0
 JHU_covid1<- JHU_covid1 %>%
   mutate(cum_sum = cumsum(cases))
@@ -402,48 +402,39 @@ JHU_covid <- subset(JHU_covid, country=="Ireland",
 
 
 
-JHU_deaths <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_deaths.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
-JHU_deaths <- JHU_deaths %>% gather(country, deaths, -c(date))
-JHU_deaths <- merge(COVID_EU_pop, JHU_deaths, by ="country")
-JHU_deaths$date_rep <- NULL
+ECDCcovidhospital <- read.csv("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv/data.csv", na.strings = "", fileEncoding = "UTF-8-BOM")
+ECDCcovidhospital <- merge(COVID_EU_pop, ECDCcovidhospital, by ="country")
+ECDC_hospital_occupancy <- subset(ECDCcovidhospital, indicator == "Daily hospital occupancy")
+ECDC_hospital_occupancy  <- ECDC_hospital_occupancy  %>% 
+  mutate(pop100k=pop_data2019/100000)
+ECDC_hospital_occupancy  <- ECDC_hospital_occupancy  %>% 
+  mutate(occupancy_per_100k=value/pop100k)
+ECDC_hospital_occupancy<- subset(ECDC_hospital_occupancy, select=c(country, date, occupancy_per_100k))
+spread_hosp <- spread(ECDC_hospital_occupancy, country, occupancy_per_100k)
+spread_hosp$date <- as.Date(spread_hosp$date)
+spread_hosp <-  spread_hosp %>% 
+  select(date, Ireland) %>% 
+  rename(hosp_rate = Ireland)
 
-JHU_deaths <- JHU_deaths %>%
-  group_by(country) %>%
-  mutate(pop100k = pop_data2019/100000)
-JHU_deaths$date <- as.Date(JHU_deaths$date , format = "%Y-%m-%d")
-JHU_deaths <- arrange(JHU_deaths, date)
-JHU_deaths <- JHU_deaths %>% 
-  group_by(country)%>%
-  mutate(cumdeaths=fnrollsuml(deaths))
-JHU_deaths <- JHU_deaths %>% 
-  mutate(deaths_14day_per_100k = cumdeaths/pop100k)
-spread_deaths <- subset(JHU_deaths,
-                     select=c(country, date, deaths_14day_per_100k))
-spread_deaths <- spread(spread_deaths, country, deaths_14day_per_100k)
-write.csv(spread_deaths, file="deaths.csv", row.names=TRUE)
-
-JHU_deaths <- subset(JHU_deaths, country=="Ireland",
-                     select=c(date, deaths_14day_per_100k))
-
-JHU_IE <- merge(JHU_deaths, JHU_covid, by="date")
+JHU_IE <- merge(spread_hosp, JHU_covid, by="date")
 
 
 JHU_IE <- JHU_IE %>% 
   rename(
-    "14 day fatalities per 100,000" = deaths_14day_per_100k,
+    "Hospitalised Covid-19 cases per 100,000" = hosp_rate,
     "14 day incidence rate per 100,000" = incidence_14day_per_100k
   )
 
-IE_xts <- tk_xts(JHU_IE, select = `14 day fatalities per 100,000` |  `14 day incidence rate per 100,000`, date_var = date) 
+IE_xts <- tk_xts(JHU_IE, select = `Hospitalised Covid-19 cases per 100,000` |  `14 day incidence rate per 100,000`, date_var = date) 
 dygraph(IE_xts) %>%
   dyOptions(colors = RColorBrewer::brewer.pal(8, "Dark2")) %>%
   dyAxis("y", label = "Cases")%>%
-  dyAxis("y2", label = "Deaths ") %>%
-  dySeries("14 day fatalities per 100,000", axis=('y2'))
+  dyAxis("y2", label = "Hospitalised cases ") %>%
+  dySeries("Hospitalised Covid-19 cases per 100,000", axis=('y2'))
 
 ```
 
-> Source: Johns Hopkins University/Our World in Data
+> Source: Johns Hopkins University/Our World in Data/ECDC
 
 
 Mobility 
