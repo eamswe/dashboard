@@ -1044,6 +1044,9 @@ This chart shows the percentage change in seasonally-adjusted job postings on th
 =============================
 Row 
 -----------------------------------------
+### Is this dashboard being updated?
+As of October 2022, the dashboard is no longer being updated. With a number of data sources being discontinued and the acute phases of the pandemic behind us, the usefulness of the dashboard had diminished. 
+
 ### Why are some of the statistics here different than the Department of Health GeoHive Covid data hub?
 The Department of Health GeoHive Covid data hub and the HPSC should be considered the authoritative sources of data on Covid-19 in Ireland. Some of the statistics here may vary because they’ve been sourced from cross country datasets like those from the ECDC and Our World in Data dataset. This means there may be delays or small discrepancies between the two datasets and some of the calculations used.
 
